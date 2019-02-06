@@ -16,7 +16,7 @@
 - Save course direct download links to a text file (option: `--save`).
 - Cache credentials to a file and use it later for login purpose (option: `--cache`).
 - List down course contents and video resolution, suggest the best resolution (option: `--info`).
-- Download/skip all available subtitles for a video (options: `--skip-sub, --skip-sub`).
+- Download/skip all available subtitles for a video (options: `--sub-only, --skip-sub`).
 - Download spacific chapter in a course (option: `-c / --chapter`).
 - Download specific lecture in a chapter (option: `-l / --lecture`).
 - Download chapter(s) by providing range in a course (option: `--chapter-start, --chapter-end`).
@@ -30,6 +30,9 @@
 ## ***Issue Reporting Guideline***
 
 To maintain an effective bugfix workflow and make sure issues will be solved, I ask reporters to follow some simple guidelines.
+
+### ***Note***
+ - ***if any of the issue is not following the below template and guideline i will not facilitate that issue & will directly close.***
 
 Before creating an issue, please do the following:
 
@@ -58,13 +61,14 @@ experience the problem? All these details will help to fix any potential bugs as
 >
 > Any other information you want to share that is relevant to the issue being reported.
 
-## ***Extracting Cookies***
+## ***Extracting Cookies / Request Headers***
 
  - Login to your udemy account via browser.
  - Once you are logged in right click on page the search for option called **Inspect Element** and click on that.
  - Under that look for **Network Tab** and click on that. Under that **Network Tab** click on Requests type **XHR** .
  - Now click on **My Courses** in the Udemy navbar and refresh the page you will see some requests under **Network Tab**.
- - Right click on any of the Requests which is links to **udemy.com**. Simply copy **Request Headers** and save to text file.
+ - Right click on request links to **udemy.com/api-2.0/**. Simply copy **Request Headers** and save to text file.
+ - The above guide is for ***Firefox*** users. ***Chrome*** Users can follow [guide by @lamlephamngoc](https://github.com/r0oth3x49/udemy-dl/issues/303#issuecomment-441345792).
  - Done run the udemy-dl against that text file it will start downloading the course.
 
 ## ***Requirements***

@@ -44,6 +44,7 @@ from ._compat import (
             COURSE_URL,
             ParseCookie,
             MY_COURSES_URL,
+            COURSE_SEARCH
             )
 from ._sanitize import (
             slugify,
@@ -64,31 +65,30 @@ class Udemy(ProgressBar):
     def _clean(self, text):
         ok = re.compile(r'[^\\/:*?"<>|]')
         text = "".join(x if ok.match(x) else "_" for x in text)
-        return re.sub('\.+$', '', text) if text.endswith(".") else text
+        return re.sub('\.+$', '', text.rstrip()) if text.endswith(".") else text.rstrip()
 
     def _course_name(self, url):
-        if '/learn/v4' in url:
-            url = url.split("learn/v4")[0]
-        course_name = url.split("/")[-1] if not url.endswith("/") else url.split("/")[-2]
-        return course_name
+        # mobj = re.search(r'(?i)(?:(.+)\.com/(?P<course_name>[a-zA-Z0-9_-]+))', url, re.I)
+        mobj = re.search(r'(?i)(?://(?P<portal_name>.+?).udemy.com/(?P<course_name>[a-zA-Z0-9_-]+))', url)
+        if mobj:
+            return mobj.group('portal_name'), mobj.group('course_name')
 
     def _extract_cookie_string(self, raw_cookies):
         cookies = {}
         cookie_parser = ParseCookie()
         try:
-            cookie_string = re.search(r'Cookie:\s*(.+)\n', raw_cookies, flags=re.I).group(1)
+            cookie_string = re.search(r'(?i)(?:Cookie\:(?P<cookie>.+)\s*)', raw_cookies)
         except:
             sys.stdout.write(fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fr + sb + "Cookies error, Request Headers is required.\n")
             sys.stdout.write(fc + sd + "[" + fm + sb + "i" + fc + sd + "] : " + fg + sb + "Copy Request Headers for single request to a file, while you are logged in.\n")
             sys.exit(0)
-        cookie_parser.load(cookie_string)
+        cookie_parser.load(cookie_string.group('cookie'))
         for key, cookie in cookie_parser.items():
             cookies[key] = cookie.value
         return cookies
 
-    
     def _sanitize(self, unsafetext):
-        text = sanitize(slugify(unsafetext, lower=False, spaces=True, ok=SLUG_OK + '().'))
+        text = sanitize(slugify(unsafetext, lower=False, spaces=True, ok=SLUG_OK + '().[]'))
         return text
 
     def _login(self, username='', password='', cookies=''):
@@ -111,36 +111,58 @@ class Udemy(ProgressBar):
     def _logout(self):
         return self._session.terminate()
 
+    def __extract_course(self, response, course_name):
+        _temp = {}
+        if response:
+            for entry in response:
+                if entry.get('published_title') == course_name:
+                    _temp = entry
+        return _temp
+
     def _extract_course_info(self, url):
-        if 'www' not in url:
-            self._session._headers['Host'] = url.replace("https://", "").split('/', 1)[0]
-            self._session._headers['Referer'] = url
+        portal_name, course_name = self._course_name(url)
+        self._session._headers.update({
+            'Host' : '{portal_name}.udemy.com'.format(portal_name=portal_name),
+            'Referer' : 'https://{portal_name}.udemy.com/home/my-courses/search/?q={course_name}'.format(portal_name=portal_name, course_name=course_name)
+            })
+        url = COURSE_SEARCH.format(portal_name=portal_name, course_name=course_name)
         try:
-            webpage = self._session._get(url).text
+            webpage = self._session._get(url).json()
         except conn_error as e:
             sys.stdout.write(fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fr + sb + "Connection error : make sure your internet connection is working.\n")
             time.sleep(0.8)
             sys.exit(0)
+        except (ValueError, Exception) as e:
+            sys.stdout.write(fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fr + sb + "%s.\n" % (e))
+            time.sleep(0.8)
+            sys.exit(0)
         else:
-            course = parse_json(
-                        search_regex(
-                            r'ng-init=["\'].*\bcourse=({.+?});', 
-                            webpage, 
-                            'course', 
-                            default='{}'
-                            ),
-                        "Course Information",
-                        transform_source=unescapeHTML,
-                        fatal=False,
-                        )
-            course_id = course.get('id') or search_regex(
-                                                (r'data-course-id=["\'](\d+)', r'&quot;id&quot;\s*:\s*(\d+)'),
-                                                webpage, 
-                                                'course id'
-                                                )
-        if course_id:
-            return course_id, course
+            results = webpage.get('results', [])
+            if not results:
+                try:
+                    url = MY_COURSES_URL.format(portal_name=portal_name)
+                    webpage = self._session._get(url).json()
+                except conn_error as e:
+                    sys.stdout.write(fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fr + sb + "Connection error : make sure your internet connection is working.\n")
+                    time.sleep(0.8)
+                    sys.exit(0)
+                except (ValueError, Exception) as e:
+                    sys.stdout.write(fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fr + sb + "%s.\n" % (e))
+                    time.sleep(0.8)
+                    sys.exit(0)
+                else:
+                    results = webpage.get('results', [])
+            course = self.__extract_course(response=results, course_name=course_name)
+        if course:
+            course.update({'portal_name' : portal_name})
+            return course.get('id'), course
         else:
+            sys.stdout.write('\033[2K\033[1G\r\r' + fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fg + sb + "Downloading course information, course id not found .. (%s%sfailed%s%s)\n" % (fr, sb, fg, sb))
+            sys.stdout.write(fc + sd + "[" + fw + sb + "i" + fc + sd + "] : " + fw + sb + "It seems either you are not enrolled or you have to visit the course atleast once while you are logged in.\n")
+            sys.stdout.write(fc + sd + "[" + fm + sb + "*" + fc + sd + "] : " + fg + sb + "Trying to logout now...\n")
+            if not self._cookies:
+                self._logout()
+            sys.stdout.write(fc + sd + "[" + fm + sb + "+" + fc + sd + "] : " + fg + sb + "Logged out successfully.\n")
             sys.exit(0)
 
     def _extract_large_course_content(self, url):
@@ -168,15 +190,16 @@ class Udemy(ProgressBar):
                             data['results'].append(d)
             return data
 
-    def _extract_course_json(self, course_id):
-        url = COURSE_URL.format(course_id=course_id)
+    def _extract_course_json(self, url, course_id, portal_name):
+        self._session._headers.update({'Referer' : url})
+        url = COURSE_URL.format(portal_name=portal_name, course_id=course_id)
         try:
             resp = self._session._get(url).json()
         except conn_error as e:
             sys.stdout.write(fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fr + sb + "Connection error : make sure your internet connection is working.\n")
             time.sleep(0.8)
             sys.exit(0)
-        except Exception as e:
+        except (ValueError, Exception) as e:
             resp = self._extract_large_course_content(url=url)
             return resp
         else:
@@ -253,6 +276,21 @@ class Udemy(ProgressBar):
                 })
         return _temp
 
+    def _extract_audio(self, assets):
+        _temp = []
+        download_urls = assets.get('download_urls')
+        filename = self._sanitize(assets.get('filename'))
+        if download_urls and isinstance(download_urls, dict):
+            extension = filename.rsplit('.', 1)[-1] if '.' in filename else ''
+            download_url = download_urls.get('Audio', [])[0].get('file')
+            _temp.append({
+                'type' : 'audio',
+                'filename' : filename,
+                'extension' : extension,
+                'download_url' : download_url
+                })
+        return _temp
+
     def _extract_sources(self, sources):
         _temp   =   []
         if sources and isinstance(sources, list):
@@ -260,6 +298,8 @@ class Udemy(ProgressBar):
                 label           = source.get('label')
                 download_url    = source.get('file')
                 if not download_url:
+                    continue
+                if label.lower() == 'audio':
                     continue
                 height = label if label else None
                 if height == "2160":
@@ -350,32 +390,16 @@ class Udemy(ProgressBar):
                     })
         return _temp
 
-    def _lectures_count(self, chapters):
-        lectures = 0
-        for entry in chapters:
-            lectures_count = entry.get('lectures_count') if entry.get('lectures_count') else 0
-            lectures += lectures_count
-        return lectures
-
     def _real_extract(self, url=''):
 
         _udemy      =   {}
         course_id, course_info = self._extract_course_info(url)
 
         if course_info and isinstance(course_info, dict):
-            course_title = self._course_name(url)
-            isenrolled = course_info['features'].get('enroll')
-            if not isenrolled:
-                sys.stdout.write(fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fr + sb + "Udemy Says you are not enrolled in course.")
-                sys.stdout.write(fc + sd + "[" + fm + sb + "*" + fc + sd + "] : " + fg + sb + "Trying to logout now...\n")
-                if not self._cookies:
-                    self._logout()
-                sys.stdout.write(fc + sd + "[" + fm + sb + "+" + fc + sd + "] : " + fg + sb + "Logged out successfully.\n")
-                sys.exit(0)
-        else:
-            course_title = self._course_name(url)
+            course_title = course_info.get('published_title')
+            portal_name = course_info.get('portal_name')
 
-        course_json = self._extract_course_json(course_id)
+        course_json = self._extract_course_json(url, course_id, portal_name)
         course = course_json.get('results')
         resource = course_json.get('detail')
 
@@ -457,6 +481,8 @@ class Udemy(ProgressBar):
                                 retVal      = self._extract_file(asset)
                             elif asset_type == 'presentation':
                                 retVal      = self._extract_ppt(asset)
+                            elif asset_type == 'audio':
+                                retVal      = self._extract_audio(asset)
 
 
                         if view_html:
@@ -503,7 +529,7 @@ class Udemy(ProgressBar):
                             lecture_index   = entry.get('object_index')
                             lecture_title   = self._sanitize(entry.get('title'))
                             lecture         = "{0:03d} {1!s}".format(lecture_index, lecture_title)
-                            unsafe_lecture  = u'{0:03d} '.format(lecture_index) + entry.get('title')
+                            unsafe_lecture  = u'{0:03d} '.format(lecture_index) + self._clean(entry.get('title'))
                             data            = asset.get('stream_urls')
                             if data and isinstance(data, dict):
                                 sources     = data.get('Video')
@@ -558,6 +584,6 @@ class Udemy(ProgressBar):
                     _udemy['chapters'][counter]['lectures'] = lectures
                     _udemy['chapters'][counter]['lectures_count'] = len(lectures)
             _udemy['total_chapters'] = len(_udemy['chapters'])
-            _udemy['total_lectures'] = self._lectures_count(_udemy['chapters'])
+            _udemy['total_lectures'] = sum([entry.get('lectures_count', 0) for entry in _udemy['chapters'] if entry])
 
         return _udemy

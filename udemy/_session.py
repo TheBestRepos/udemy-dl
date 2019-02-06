@@ -24,11 +24,13 @@ THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 '''
 
 from ._compat import (
-    
+                sys,
+                time,
                 requests,
                 HEADERS,
                 LOGOUT_URL,
             )
+from ._colorized import *
 
 
 class Session(object):
@@ -38,18 +40,29 @@ class Session(object):
         self._session = requests.sessions.Session()
 
     def _set_auth_headers(self, access_token='', client_id=''):
-        self._headers['X-Udemy-Bearer-Token'] = access_token
-        self._headers['X-Udemy-Client-Id'] = client_id
         self._headers['Authorization'] = "Bearer {}".format(access_token)
         self._headers['X-Udemy-Authorization'] = "Bearer {}".format(access_token)
 
     def _get(self, url):
-        return self._session.get(url, headers=self._headers)
+        session = self._session.get(url, headers=self._headers)
+        if session.ok:
+            return session
+        if not session.ok:
+            msg = session.json()
+            sys.stdout.write(fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fr + sb + "Udemy Says : %s %s %s ...\n" % (session.status_code, session.reason, msg.get('detail', '')))
+            time.sleep(0.8)
+            sys.exit(0)
 
     def _post(self, url, data):
-        return self._session.post(url, data, headers=self._headers)
+        session = self._session.post(url, data, headers=self._headers)
+        if session.ok:
+            return session
+        if not session.ok:
+            msg = session.json()
+            sys.stdout.write(fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fr + sb + "Udemy Says : %s %s %s ...\n" % (session.status_code, session.reason, msg.get('detail', '')))
+            time.sleep(0.8)
+            sys.exit(0)
 
     def terminate(self):
-        self._get(LOGOUT_URL)
         self._set_auth_headers()
         return
