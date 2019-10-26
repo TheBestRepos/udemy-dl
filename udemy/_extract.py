@@ -70,23 +70,26 @@ class Udemy(ProgressBar):
         return text
 
     def _course_name(self, url):
-        # mobj = re.search(r'(?i)(?:(.+)\.com/(?P<course_name>[a-zA-Z0-9_-]+))', url, re.I)
-        mobj = re.search(r'(?i)(?://(?P<portal_name>.+?).udemy.com/(?P<course_name>[a-zA-Z0-9_-]+))', url)
+        mobj = re.search(r'(?i)(?://(?P<portal_name>.+?).udemy.com/(?:course(/draft)*/)?(?P<name_or_id>[a-zA-Z0-9_-]+))', url)
         if mobj:
-            return mobj.group('portal_name'), mobj.group('course_name')
+            return mobj.group('portal_name'), mobj.group('name_or_id')
 
     def _extract_cookie_string(self, raw_cookies):
         cookies = {}
-        cookie_parser = ParseCookie()
         try:
-            cookie_string = re.search(r'(?i)(?:Cookie\:(?P<cookie>.+)\s*)', raw_cookies)
+            # client_id = re.search(r'(?i)(?:client_id=(?P<client_id>\w+))', raw_cookies)
+            access_token = re.search(r'(?i)(?:access_token=(?P<access_token>\w+))', raw_cookies)
         except:
             sys.stdout.write(fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fr + sb + "Cookies error, Request Headers is required.\n")
             sys.stdout.write(fc + sd + "[" + fm + sb + "i" + fc + sd + "] : " + fg + sb + "Copy Request Headers for single request to a file, while you are logged in.\n")
             sys.exit(0)
-        cookie_parser.load(cookie_string.group('cookie'))
-        for key, cookie in cookie_parser.items():
-            cookies[key] = cookie.value
+        if not access_token:
+            sys.stdout.write(fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fr + sb + "Cookies error, unable to find access_token, proper cookies required.\n")
+            sys.stdout.flush()
+            sys.exit(0)
+        access_token = access_token.group('access_token')
+        cookies.update({'access_token': access_token})
+        #'client_id': client_id.group('client_id'),
         return cookies
 
     def _sanitize(self, unsafetext):
@@ -174,8 +177,11 @@ class Udemy(ProgressBar):
         _temp = {}
         if response:
             for entry in response:
-                if entry.get('published_title') == course_name:
+                course_id = str(entry.get('id'))
+                published_title = entry.get('published_title')
+                if course_name in (published_title, course_id):
                     _temp = entry
+                    break
         return _temp
 
     def _extract_course_info(self, url):
@@ -231,7 +237,11 @@ class Udemy(ProgressBar):
         self._session._headers.update({'Referer' : url})
         url = COURSE_URL.format(portal_name=portal_name, course_id=course_id)
         try:
-            resp = self._session._get(url).json()
+            resp = self._session._get(url)
+            if resp.status_code == 502:
+                resp = self._extract_large_course_content(url=url)
+            else:
+                resp = resp.json()
         except conn_error as e:
             sys.stdout.write(fc + sd + "[" + fr + sb + "-" + fc + sd + "] : " + fr + sb + "Connection error : make sure your internet connection is working.\n")
             time.sleep(0.8)
@@ -379,7 +389,7 @@ class Udemy(ProgressBar):
                 download_url = track.get('url')
                 if not download_url or not isinstance(download_url, encoding):
                     continue
-                lang = track.get('language') or track.get('srclang') or track.get('label') or track['locale'].get('locale').split('_')[0]
+                lang = track.get('language') or track.get('srclang') or track.get('label') or track['locale_id'].split('_')[0]
                 ext = 'vtt' if 'vtt' in download_url.rsplit('.', 1)[-1] else 'srt'
                 _temp.append({
                     'type' : 'subtitle',
