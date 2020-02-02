@@ -45,7 +45,7 @@ class Session(object):
 
     def _get(self, url):
         session = self._session.get(url, headers=self._headers)
-        if session.ok or session.status_code == 502:
+        if session.ok or session.status_code in [502, 503]:
             return session
         if not session.ok:
             if session.status_code == 403:
